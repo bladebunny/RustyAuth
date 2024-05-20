@@ -15,8 +15,8 @@ let package = Package(
             targets: ["RustyAuth"]),
     ],
     dependencies: [
-        .package(path: "/Users/tim.a.brooks/Documents/Source/Libs/RustyExtensions"),
-        //.package(url: "https://github.com/bladebunny/RustyExtensions", branch: "develop")
+        //.package(path: "/Users/tim.a.brooks/Documents/Source/Libs/RustyExtensions"),
+        .package(url: "https://github.com/bladebunny/RustyExtensions", branch: "main")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
