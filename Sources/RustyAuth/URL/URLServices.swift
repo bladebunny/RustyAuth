@@ -1,5 +1,5 @@
 //
-//  URLBuilder.swift
+//  URLServices.swift
 //
 //
 //  Created by Tim Brooks on 5/18/24.
@@ -7,7 +7,7 @@
 
 import Foundation
 
-public struct URLBuilder {
+public struct URLServices {
     
     // MARK: - Properties
     let config: PKCEConfig
@@ -35,6 +35,11 @@ public struct URLBuilder {
             queryItems.append(URLQueryItem(name: AuthKeys.state, value: state))
         }
 
+        // Optional scope
+        if let scopes = self.config.scopes {
+            queryItems.append(URLQueryItem(name: AuthKeys.scope, value: scopes))
+        }
+        
         // Additional params
         if let params = self.config.additionalAuthParams {
             for (key, value) in params {
@@ -76,6 +81,7 @@ public struct URLBuilder {
         
         body.append("&\(AuthKeys.clientID)=\(self.config.clientID)")
         body.append("&\(AuthKeys.codeVerifier)=\(codeVerifier)")
+        body.append("&\(AuthKeys.grantType)=\(AuthValues.authorizationCode)")
 
         // Additional params
         if let params = self.config.additionalTokenBodyParams {
@@ -90,11 +96,3 @@ public struct URLBuilder {
         return request
     }
 }
-
-/*
- client_id: clientId,
-  grant_type: 'authorization_code',
-  code,
-  redirect_uri: redirectUri,
-  code_verifier: codeVerifier,
- */

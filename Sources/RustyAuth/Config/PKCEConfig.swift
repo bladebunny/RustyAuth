@@ -21,6 +21,7 @@ public protocol PKCEConfig {
     var responseType: String { get }
     var challengeMethod: String { get }
     var state: String? { get }
+    var scopes: String? { get }
     var additionalAuthParams: [String: String]? { get }
     var additionalTokenBodyParams: [String: String]? { get }
     var additionalTokenHeaders: [String: String]? { get }
@@ -40,6 +41,7 @@ public class StandardPKCEConfig: PKCEConfig {
     public var responseType: String
     public var challengeMethod: String
     public var state: String?
+    public var scopes: String?
     public var additionalAuthParams: [String: String]?
     public var additionalTokenBodyParams: [String: String]?
     public var additionalTokenHeaders: [String: String]?
@@ -48,6 +50,7 @@ public class StandardPKCEConfig: PKCEConfig {
     public init(authorizeUrl: String,
                 tokenUrl: String,
                 clientID: String,
+                scopes: String? = nil,
                 responseType: String = AuthKeys.code,
                 redirectUri: String = String.empty,
                 scheme: String,
@@ -60,7 +63,8 @@ public class StandardPKCEConfig: PKCEConfig {
         self.redirectUri = redirectUri
         self.responseType = responseType
         self.scheme = scheme
-        self.tokenUrl = tokenUrl
+        self.scopes = scopes
         self.state = state
+        self.tokenUrl = tokenUrl
     }
 }

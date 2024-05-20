@@ -6,158 +6,98 @@
 //
 
 import Foundation
-import Combine
 import AuthenticationServices
 
-public enum AuthSessionState {
-    case idle
-    case authenticating
-    case accessCodeReceived(code: String, state: String?)
-    case authenticated(token: String)
-    case error(Error)
-    case failed(Error?)
-    case cancelled
-}
 
 public class PKCEAuthSession: NSObject, ObservableObject {
     
     // MARK: - Properties
-    let urlBuilder: URLBuilder
+    let urlBuilder: URLServices
     let config: PKCEConfig
-    let presentationAnchor: ASPresentationAnchor
     var session: ASWebAuthenticationSession? = nil
     var codeVerifier: String = String.empty
-    var cancellables: Set<AnyCancellable> = Set()
-    
-    @Published public var state: AuthSessionState = .idle
     
     // MARK: - Initializers
-    public init(config: PKCEConfig, presentationAnchor: ASPresentationAnchor) {
+    public init(config: PKCEConfig) {
         
         self.config = config
-        self.urlBuilder = URLBuilder(config: config)
-        self.presentationAnchor = presentationAnchor
+        self.urlBuilder = URLServices(config: config)
     }
-    
-    deinit {
-        self.cancel()
-        self.state = .idle
-    }
-    
+        
     // MARK: - Auth actions
-    public func start() {
-        
-        let verifier = PKCE.createCodeVerifier()
-        let challenge = PKCE.createCodeChallenge(from: verifier)!
-        let url = self.urlBuilder.createAuthURL(codeChallenge: challenge)
-        
-        let session = ASWebAuthenticationSession(url: url,
-                                                 callbackURLScheme: self.config.scheme,
-                                                 completionHandler: self.authHandler)
-        
-        session.presentationContextProvider = self
-        
-        self.state = .authenticating
-        self.codeVerifier = verifier
-        self.session = session
-
-        session.start()
-    }
-    
-    public func cancel() {
-        self.session?.cancel()
-        self.state = .cancelled
-        
-        for cancellable in cancellables {
-            cancellable.cancel()
-        }
-        
-        self.cancellables.removeAll()
-    }
-    
-    public func reset() {
-        self.state = .idle
-    }
-    
-    // MARK: - Auth handlers
-    private func authHandler(_ callbackURL: URL?, error: Error? = nil) {
-        
-        DispatchQueue.main.async { [weak self] in
-            
-            guard let self = self else { return}
-            
-            guard let url = callbackURL else {
-                
-                // Convert error if possible
-                var resultError = error
-                if let error = error {
-                    resultError = AuthError.authRequestFailed(error)
-                }
-                
-                self.state = .failed(resultError)
-                return
-            }
-            
-            if let error = error {
-                self.state = .error(error)
-                return
-            }
-            
-            let items = URLComponents(string: url.absoluteString)?.queryItems
-            guard let code = items?.filter({ $0.name == AuthKeys.code }).first?.value else {
-                
-                self.state = .failed(AuthError.authResponseNoCode)
-                
-                return
-            }
-            
-            // Get code
-            self.state = .accessCodeReceived(code: code, state: items?.filter({ $0.name == AuthKeys.code }).first?.value)
-            self.exchangeForToken(code: code)
-        }
-    }
-    
-    private func exchangeForToken(code: String) {
+    public func fetchAccessToken(code: String) async throws -> String {
         
         let request = self.urlBuilder.createAcessTokenRequest(code: code,
                                                               codeVerifier: self.codeVerifier)
-        print("Request: \(request.debugDescription)")
+        let (data, response) = try await URLSession.shared.data(for: request)
         
-        URLSession.shared
-            .dataTaskPublisher(for: request)
-            .receive(on: DispatchQueue.main)
-            .sink(receiveCompletion: { result in
-                print(result)
-            }, receiveValue: { data, response in
+        // URL Response check
+        guard let urlResponse = response as? HTTPURLResponse else {
+            throw AuthError.tokenRequestFailed(URLError(.unknown))
+        }
+        
+        // Success status
+        guard urlResponse.statusCode == 200 else {
+            throw AuthError.tokenRequestServerError("\(urlResponse.statusCode)")
+        }
                 
-                guard let response = response as? HTTPURLResponse else {
-                    self.state = .failed(URLError(.badServerResponse))
-                    return
+        // Data valid
+        guard let result = String(data: data, encoding: .utf8) else {
+            throw AuthError.tokenResponseInvalidData("Unable to de-serialize data")
+        }
+        
+        return result
+    }
+    
+    // On MainActor due to UI interaction
+    @MainActor public func fetchAuthCode() async throws -> String {
+        
+        self.codeVerifier = PKCE.createCodeVerifier()
+        let challenge = PKCE.createCodeChallenge(from: self.codeVerifier)!
+        let url = self.urlBuilder.createAuthURL(codeChallenge: challenge)
+
+        return try await withCheckedThrowingContinuation { (it: CheckedContinuation<String, Error>) -> Void in
+
+            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: self.config.scheme) { url, error in
+             
+                if let error = error {
+                    return it.resume(throwing: error)
                 }
-                
-                guard response.statusCode == 200, let body = String(data: data, encoding: .utf8) else {
-                    self.state = .failed(URLError(.cannotDecodeRawData))
-                    return
+
+                guard let url = url else {
+                    return it.resume(throwing: AuthError.authResponseNoUrl)
                 }
-                
-//                let parameters: [String: String] = body.components(separatedBy: "&")
-//                    .reduce(into: [:]) { dict, value in
-//                        let keyValuePair = value.components(separatedBy: "=")
-//                        dict[keyValuePair.first!] = keyValuePair.last!
-//                    }
-                
-//                let token = AccessToken(token: body)
-                
-                self.state = .authenticated(token: body)
-                self.codeVerifier = String.empty
-            })
-            .store(in: &self.cancellables)
+
+                // Get state
+                guard let items = URLComponents(string: url.absoluteString)?.queryItems,
+                      let verifyState = (items.filter({ $0.name == AuthKeys.state }).first?.value as? String) else {
+                    return it.resume(throwing: AuthError.authResponseNoState)
+                }
+
+                // Verify state
+                if let originalState = self.config.state, originalState != verifyState {
+                    return it.resume(throwing: AuthError.authResponseInvalidState)
+                }
+
+                // Get code
+                guard let items = URLComponents(string: url.absoluteString)?.queryItems,
+                      let code = items.filter({ $0.name == AuthKeys.code }).first?.value else {
+                    return it.resume(throwing: AuthError.authResponseNoCode)
+                }
+                                    
+                it.resume(returning: code)
+            }
+            
+            // Kick it off
+            session.presentationContextProvider = self
+            session.start()
+        }
     }
 }
 
 extension PKCEAuthSession: ASWebAuthenticationPresentationContextProviding {
     
     public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        return self.presentationAnchor
+        return ASPresentationAnchor()
     }
 }
