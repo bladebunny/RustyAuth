@@ -9,7 +9,7 @@ import Foundation
 import AuthenticationServices
 
 
-public class PKCEAuthSession: NSObject, ObservableObject {
+public class PKCEAuthSession: NSObject {
     
     // MARK: - Properties
     let urlBuilder: URLServices
@@ -25,10 +25,9 @@ public class PKCEAuthSession: NSObject, ObservableObject {
     }
         
     // MARK: - Auth actions
-    public func fetchAccessToken(code: String) async throws -> String {
+    public func fetchToken(with code: String) async throws -> String {
         
-        let request = self.urlBuilder.createAcessTokenRequest(code: code,
-                                                              codeVerifier: self.codeVerifier)
+        let request = self.urlBuilder.createAcessTokenRequest(code: code, codeVerifier: self.codeVerifier)
         let (data, response) = try await URLSession.shared.data(for: request)
         
         // URL Response check
